@@ -3,11 +3,13 @@ pipeline {
 
   environment {
     IMAGE = "shrikantpawars/car-rental:latest"
-    DEPLOY_USER = "ubuntu"               // change to your server user
-    DEPLOY_HOST = "44.223.39.76" //
+    DEPLOY_USER = "ubuntu"
+    DEPLOY_HOST = "44.223.39.76"     // <-- REPLACE WITH YOUR EC2 PUBLIC IP
+    DEPLOY_PORT = "8081"
   }
 
   stages {
+
     stage('Checkout') {
       steps {
         checkout scm
@@ -16,34 +18,35 @@ pipeline {
 
     stage('Build Image') {
       steps {
-        sh 'docker build -t $IMAGE .'
+        bat """
+          docker build -t %IMAGE% .
+        """
       }
     }
 
     stage('Push Image') {
       steps {
-        withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-          sh '''
-            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-            docker push $IMAGE
-          '''
+        withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', 
+                                          usernameVariable: 'DOCKER_USER', 
+                                          passwordVariable: 'DOCKER_PASS')]) {
+          bat """
+            echo %DOCKER_PASS% | docker login -u %DOCKER_USER% --password-stdin
+            docker push %IMAGE%
+          """
         }
       }
     }
 
     stage('Deploy to Server') {
       steps {
-        // Uses SSH credentials stored in Jenkins as 'deploy-ssh-key'
-        sshagent (credentials: ['deploy-ssh-key']) {
-          sh '''
-            # Commands run on Jenkins agent that use ssh to control remote server
-            ssh -o StrictHostKeyChecking=no $DEPLOY_USER@$DEPLOY_HOST "
-              docker pull $IMAGE &&
-              docker stop car-rental-container || true &&
-              docker rm car-rental-container || true &&
-              docker run -d --name car-rental-container -p 80:80 $IMAGE
-            "
-          '''
+        sshagent(['deploy-ssh-key']) {
+
+          bat """
+            ssh -o StrictHostKeyChecking=no %DEPLOY_USER%@%DEPLOY_HOST% "docker pull %IMAGE%"
+            ssh -o StrictHostKeyChecking=no %DEPLOY_USER%@%DEPLOY_HOST% "docker stop car-rental-container || true"
+            ssh -o StrictHostKeyChecking=no %DEPLOY_USER%@%DEPLOY_HOST% "docker rm car-rental-container || true"
+            ssh -o StrictHostKeyChecking=no %DEPLOY_USER%@%DEPLOY_HOST% "docker run -d --name car-rental-container -p %DEPLOY_PORT%:80 %IMAGE%"
+          """
         }
       }
     }
@@ -51,10 +54,10 @@ pipeline {
 
   post {
     success {
-      echo 'Pipeline finished successfully'
+      echo "Pipeline finished successfully"
     }
     failure {
-      echo 'Pipeline failed'
+      echo "Pipeline failed"
     }
   }
 }
